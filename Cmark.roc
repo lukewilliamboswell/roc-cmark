@@ -7,8 +7,11 @@ interface Cmark
         Parser.Core.{Parser, buildPrimitiveParser, oneOf, many},
     ]
 
+UnparsedInline : List U8
+
 RawBlock : [
-    Heading Nat (List U8),
+    Heading Nat UnparsedInline,
+    # Paragraph (List Inline)
 ]
 
 # PARSER

@@ -5,6 +5,7 @@ app "cmark-spec-tests"
         pf.Stderr,
         pf.Task.{ Task },
         Cmark.{ parse, render },
+        TerminalColor.{ Color, withColor}
     ]
     provides [
         main,
@@ -13,6 +14,25 @@ app "cmark-spec-tests"
 main : Task {} []
 main =
     Task.onFail example62 \_ -> crash "Oops, something went wrong."
+
+pass = withColor "PASS: " Green
+fail = withColor "FAIL: " Red
+
+
+runTest : Str, Str, Str -> Task {} []
+runTest = \name, input, expected ->
+    when parse input is 
+        Ok blocks -> 
+            result = render blocks
+            if result == expected then 
+                Stdout.line ("\(pass)\(name)")
+            else 
+
+                Stderr.line "\(fail)\nEXPECTED\n\(expected)\nGOT\n\(result)"
+        Err (SomethingWentWrong msg) -> 
+            Stderr.line "\(fail)\(msg)"
+
+# ATX Headings
 
 example62 : Task {} []
 example62 = 
@@ -26,16 +46,4 @@ example62 =
         <h1>foo</h1>
         <h2>foo</h2>
         """
-    runTest input expected
-
-runTest : Str, Str -> Task {} []
-runTest = \input, expected ->
-    when parse input is 
-        Ok blocks -> 
-            result = render blocks
-            if result == expected then 
-                Stdout.line "PASS:\n\(result)"
-            else 
-                Stderr.line "FAIL: expected\n\(expected)\ngot:\n\(result)"
-        Err (SomethingWentWrong msg) -> 
-            Stderr.line "FAIL: \(msg)"
+    runTest "62 - ATX simple headings" input expected
