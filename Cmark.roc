@@ -4,14 +4,15 @@ interface Cmark
         render,
     ]
     imports [
-        Parser.Core.{Parser, buildPrimitiveParser, oneOf, many},
+        Parser.Core.{ Parser, const, buildPrimitiveParser, parsePartial, oneOf, sepBy, keep, eatWhileNot },
+        Unicode.{ whitespace, lineEnding },
     ]
 
 UnparsedInline : List U8
 
 RawBlock : [
-    Heading Nat UnparsedInline,
-    # Paragraph (List Inline)
+    Heading HeadingLevel UnparsedInline,
+    Paragraph UnparsedInline,
 ]
 
 # PARSER
@@ -20,87 +21,94 @@ parse = \str ->
     when Parser.Core.parse blockParser (Str.toUtf8 str) List.isEmpty is
         Ok a -> Ok a
         Err (ParsingFailure _) -> Err (SomethingWentWrong "Parsing failure")
-        Err (ParsingIncomplete leftover) -> 
-            msg = when Str.fromUtf8 leftover is 
-                Ok a -> a 
+        Err (ParsingIncomplete leftover) ->
+            msg = when Str.fromUtf8 leftover is
+                Ok a -> a
                 Err _ -> leftover |> List.map Num.toStr |> Str.joinWith ","
+
             Err (SomethingWentWrong "Parsing incomplete '\(msg)'")
 
-
+# Parse Blocks - 1st Pass
 blockParser : Parser (List U8) (List RawBlock)
-blockParser = 
-    many (oneOf [
-        headingParser
-    ])
+blockParser =
+    blocks = oneOf [
+        headingParser, 
+        paragraphParser, # must be last will catch everything
+    ]
 
+    sepBy blocks lineEnding
+
+
+# [ATX Headings](https://spec.commonmark.org/0.30/#atx-headings)
 headingParser : Parser (List U8) RawBlock
 headingParser =
+    const (\level -> \content ->
+        when level is
+            One -> Heading One content
+            Two -> Heading Two content
+            Three -> Heading Three content
+            Four -> Heading Four content
+            Five -> Heading Five content
+    )
+    |> keep headingLevelParser
+    |> keep (eatWhileNot whitespace)
+
+HeadingLevel : [One, Two, Three, Four, Five]
+
+headingLevelParser : Parser (List U8) HeadingLevel
+headingLevelParser =
     buildPrimitiveParser \input ->
         when input is
-            ['#', '#', ' ', ..] -> 
-                prefixLength = "## " |> Str.toUtf8 |> List.len
-                when chompUntilEOL input is 
-                    Ok r -> 
-                        content = r.val |> List.drop prefixLength
-                        Ok {val : Heading 2 content, input : (List.drop r.input 1)} 
-                    Err NotFound ->
-                        content = input |> List.drop prefixLength
-                        Ok {val : Heading 2 content, input : []} 
-            ['#', ' ', ..] -> 
-                prefixLength = "# " |> Str.toUtf8 |> List.len
-                when chompUntilEOL input is 
-                    Ok r -> 
-                        content = r.val |> List.drop prefixLength
-                        Ok {val : Heading 1 content, input : (List.drop r.input 1)} 
-                    Err NotFound ->
-                        content = input |> List.drop prefixLength
-                        Ok {val : Heading 1 content, input : []} 
+            ['#', '#', '#', '#', '#', ' ', ..] -> Ok { val: Five, input: List.drop input 6 }
+            ['#', '#', '#', '#', ' ', ..] -> Ok { val: Four, input: List.drop input 5 }
+            ['#', '#', '#', ' ', ..] -> Ok { val: Three, input: List.drop input 4 }
+            ['#', '#', ' ', ..] -> Ok { val: Two, input: List.drop input 3 }
+            ['#', ' ', ..] -> Ok { val: One, input: List.drop input 2 }
             _ -> Err (ParsingFailure "not a heading")
 
-chompUntilEOL = chompUntil '\n'
-
-# Returns the chomped content
-chompUntil : U8 -> (List U8 -> Result {val : List U8, input : List U8} [NotFound])
-chompUntil = \target ->
-    \input ->
-        check = \x -> Bool.isEq target x
-        when List.findFirstIndex input check is
-            Err _ -> Err NotFound
-            Ok index -> 
-                val = List.sublist input {start : 0, len : index }
-                Ok {val, input : List.drop input index }
+# [Paragraphs](https://spec.commonmark.org/0.30/#paragraphs)
+# A sequence of non-blank lines that cannot be interpreted as other kinds of blocks forms a paragraph.
+paragraphParser : Parser (List U8) RawBlock
+paragraphParser =
+    const Paragraph
+    |> keep (eatWhileNot whitespace)
 
 expect 
-    chomper = chompUntil '\n'
-    input = "# H\nR" |> Str.toUtf8
-    chomper input == Ok {val : ['#', ' ', 'H'], input : ['\n','R']}
-
-expect 
-    input = "# H1\n" |> Str.toUtf8
-    chompUntilEOL input
-    |> Result.map \r -> {val : Heading 1 (List.drop r.val 2), input : r.input} 
-    |> Result.mapErr \_ -> ParsingFailure "not a heading"
-    |> Bool.isEq (Ok {val :Heading 1 ['H','1'], input : ['\n']})
+    input = Str.toUtf8 "abc\n"
+    got = parsePartial paragraphParser input
+    got == Ok {val : Paragraph input, input : ['\n']}
 
 # RENDER
-render : List RawBlock -> Str 
+render : List RawBlock -> Str
 render = \blocks ->
     blocks
     |> List.map \block ->
-        when block is 
+        when block is
             Heading level contents -> renderHeading level contents
+            Paragraph contents -> renderParagraph contents
     |> Str.joinWith "\n"
 
-renderHeading : Nat, List U8 -> Str 
+renderParagraph : List U8 -> Str
+renderParagraph = \contents ->
+    contentStr =
+        when Str.fromUtf8 contents is
+            Ok a -> a
+            Err _ -> crash "unable to make paragraph from contents"
+
+    "<p>\(contentStr)</p>"
+
+renderHeading : HeadingLevel, List U8 -> Str
 renderHeading = \level, contents ->
-    contentStr = 
-        when Str.fromUtf8 contents is 
+    contentStr =
+        when Str.fromUtf8 contents is
             Ok a -> a
             Err _ -> crash "unable to make str from heading contents"
-    when level is 
-        1 -> "<h1>\(contentStr)</h1>"
-        2 -> "<h2>\(contentStr)</h2>"
-        3 -> "<h3>\(contentStr)</h3>"
-        4 -> "<h4>\(contentStr)</h4>"
-        5 -> "<h5>\(contentStr)</h5>"
-        _ -> crash "heading level not supported"
+
+    when level is
+        One -> "<h1>\(contentStr)</h1>"
+        Two -> "<h2>\(contentStr)</h2>"
+        Three -> "<h3>\(contentStr)</h3>"
+        Four -> "<h4>\(contentStr)</h4>"
+        Five -> "<h5>\(contentStr)</h5>"
+
+

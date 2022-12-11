@@ -24,10 +24,8 @@ interface Parser.Core
         flatten,
         keep,
         skip,
-        # skip,
-        # number,
-        # string,
-        # whitespace,
+        eatWhile,
+        eatWhileNot,
     ]
     imports []
 
@@ -317,4 +315,48 @@ skip = \funParser, skipParser ->
                 when parsePartial skipParser rest is 
                     Err msg2 -> Err msg2
                     Ok { val: _, input: rest2 } -> Ok { val: funVal, input: rest2 }
+
+
+# Consume the input while the input parser matches. Note this always succeeds.
+eatWhile : Parser (List a) (List a) -> Parser (List a) (List a)
+eatWhile = \checkParser ->
+    input <- buildPrimitiveParser
+
+    {index, input : rest} = eatWhileHelp checkParser {index : 0, input }
     
+    Ok {val : List.sublist input {start : 0, len : index}, input : rest} 
+
+eatWhileHelp : Parser (List a) (List a), { index : Nat, input : List a } -> { index : Nat, input : List a }
+eatWhileHelp = \checkParser, state ->
+    when parsePartial checkParser state.input is 
+        Err _ -> { index : state.index, input : state.input }
+
+        Ok { val: parsed, input: rest } ->
+
+            length = List.len parsed
+            index = state.index + length
+
+            eatWhileHelp checkParser {index, input : rest}
+
+# Consume the input while the input parser doesn't match. Note this always succeeds.
+eatWhileNot : Parser (List a) (List a) -> Parser (List a) (List a)
+eatWhileNot = \checkParser ->
+    input <- buildPrimitiveParser
+
+    {index, input : rest} = eatWhileNotHelp checkParser {index : 0, input }
+    
+    Ok {val : List.sublist input {start : 0, len : index}, input : rest} 
+
+eatWhileNotHelp : Parser (List a) (List a), { index : Nat, input : List a } -> { index : Nat, input : List a }
+eatWhileNotHelp = \checkParser, state ->
+    if List.isEmpty state.input then 
+        state
+    else 
+        when parsePartial checkParser state.input is 
+            Ok _ ->
+                state
+            Err _ -> 
+                eatWhileNotHelp checkParser {index : state.index + 1, input : List.dropFirst state.input}
+
+
+            
