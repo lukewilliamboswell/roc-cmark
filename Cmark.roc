@@ -71,7 +71,7 @@ headingLevelParser =
 paragraphParser : Parser (List U8) RawBlock
 paragraphParser =
     const Paragraph
-    |> keep (eatWhileNot whitespace)
+    |> keep (eatWhileNot lineEnding)
 
 expect 
     input = Str.toUtf8 "abc\n"
